@@ -1,154 +1,107 @@
-{
- "cells": [
-  {
-   "cell_type": "code",
-   "execution_count": null,
-   "id": "baeee723-c496-44d2-96bb-fb66758da288",
-   "metadata": {},
-   "outputs": [],
-   "source": [
-    " import networkx as nx\n",
-    "\n",
-    "    # Create a weighted graph\n",
-    "\n",
-    "weighted_graph = nx.Graph()\n",
-    "weighted_graph.add_edge(0, 1, weight=2)\n",
-    "weighted_graph.add_edge(1, 2, weight=500)\n",
-    "weighted_graph.add_edge(2, 3, weight=1)\n",
-    "weighted_graph.add_edge(3, 0, weight=5)\n",
-    "weighted_graph.add_edge(3, 4, weight=10000)\n",
-    "weighted_graph.add_edge(4, 1, weight=3)\n",
-    "   # weighted_graph.add_edge(0, 3, weight=20)\n",
-    "   # weighted_graph.add_edge(3, 5, weight=5)\n",
-    "   # weighted_graph.add_edge(5, 4, weight=10)\n",
-    "   # weighted_graph.add_edge(4, 2, weight=3)\n",
-    "   \n",
-    "\n",
-    "from qiskit_optimization.applications import Maxcut\n",
-    "\n",
-    "    # Create a Maxcut object from the weighted graph\n",
-    "maxcut = Maxcut(weighted_graph)\n",
-    "\n",
-    "    # Convert it to a QUBO (Quadratic Program)\n",
-    "qubo = maxcut.to_quadratic_program()\n",
-    "\n",
-    "ising_op, offset = qubo.to_ising()\n",
-    "\n",
-    "\n",
-    "from qiskit.circuit.library import QAOAAnsatz\n",
-    "from qiskit_aer import AerSimulator\n",
-    "from qiskit import transpile\n",
-    "\n",
-    "    # Create the QAOA ansatz (example with 2 layers)\n",
-    "reps = 2\n",
-    "qaoa_ansatz = QAOAAnsatz(cost_operator=ising_op, reps=reps)\n",
-    "qaoa_ansatz.measure_all()\n",
-    "\n",
-    "    # Assign random parameters for demonstration\n",
-    "import numpy as np\n",
-    "betas = np.random.uniform(0, np.pi, reps)\n",
-    "gammas = np.random.uniform(0, 2*np.pi, reps)\n",
-    "param_dict = dict(zip(qaoa_ansatz.parameters, np.concatenate([betas, gammas])))\n",
-    "qaoa_circuit = qaoa_ansatz.assign_parameters(param_dict)\n",
-    "\n",
-    "    # Run on simulator\n",
-    "sim = AerSimulator()\n",
-    "compiled = transpile(qaoa_circuit, sim)\n",
-    "result = sim.run(compiled, shots=10000).result()\n",
-    "counts = result.get_counts()\n",
-    "\n",
-    "print(\"Weighted MaxCut measurement counts:\")\n",
-    "print(counts)\n",
-    "\n",
-    "\n",
-    "import cirq\n",
-    "import numpy as np\n",
-    "\n",
-    "def weighted_maxcut_hamiltonian(graph):\n",
-    "        \"\"\"\n",
-    "        Constructs a weighted MaxCut Hamiltonian:\n",
-    "        H = sum_{(i,j) in E} w_ij * (I - Z_i Z_j)/2\n",
-    "        \"\"\"\n",
-    "        # Extract nodes\n",
-    "    nodes = list(graph.nodes)\n",
-    "    qubits = [cirq.NamedQubit(str(n)) for n in nodes]\n",
-    "\n",
-    "    n_qubits = len(nodes)\n",
-    "    dim = 2 ** n_qubits\n",
-    "\n",
-    "        # Identity\n",
-    "    I = np.eye(dim, dtype=complex)\n",
-    "\n",
-    "        # Initialize the total Hamiltonian\n",
-    "    H = np.zeros((dim, dim), dtype=complex)\n",
-    "\n",
-    "        # For each edge, add the weighted ZZ term\n",
-    "    for u, v, data in graph.edges(data=True):\n",
-    "        w = data.get('weight', 1.0)  # Default weight = 1 if not specified\n",
-    "            # Create a ZZ gate matrix\n",
-    "        zz_circuit = cirq.Circuit(cirq.IdentityGate(n_qubits)(*qubits),\n",
-    "                                      cirq.ZZPowGate(exponent=1)(qubits[u], qubits[v]))\n",
-    "        zz_matrix = zz_circuit.unitary()\n",
-    "\n",
-    "            # Weighted cost term\n",
-    "        H += w * 0.5 * (I - zz_matrix)\n",
-    "\n",
-    "    return H\n",
-    "\n",
-    "def is_trivial(solution):\n",
-    "    return solution == \"0\" * len(solution) or solution == \"1\" * len(solution)\n",
-    "\n",
-    "filtered_counts = {sol: cnt for sol, cnt in counts.items() if not is_trivial(sol)}\n",
-    "print(\"Filtered non-trivial results:\")\n",
-    "print(filtered_counts)\n",
-    "\n",
-    "    # (Optional) Step 7: Compute the classical maximum cut for reference\n",
-    "def max_cut_value(graph):\n",
-    "    nodes = list(graph.nodes)\n",
-    "    best_cut = 0\n",
-    "    best_partition = None\n",
-    "        # Loop over possible partitions\n",
-    "    for i in range(1, 1 << len(nodes)):\n",
-    "            set_a = [nodes[j] for j in range(len(nodes)) if (i >> j) & 1]\n",
-    "            set_b = [node for node in nodes if node not in set_a]\n",
-    "            cut_edges = sum(1 for u, v in graph.edges() if (u in set_a and v in set_b) or (u in set_b and v in set_a))\n",
-    "            if cut_edges > best_cut:\n",
-    "                best_cut = cut_edges\n",
-    "                best_partition = (set_a, set_b)\n",
-    "        return best_cut, best_partition\n",
-    "\n",
-    "    max_cut, partition = max_cut_value(weighted_graph)\n",
-    "    print(f\"Classical maximum cut: {max_cut}\")\n",
-    "    print(f\"Best partition: {partition}\")\n",
-    "\n",
-    "    # Step 8: Visualize the measurement outcomes\n",
-    "    plot_histogram(counts)\n",
-    "    plt.show()\n",
-    "\n",
-    "    fig_3 = plot_histogram(counts)\n",
-    "    fig_3"
-   ]
-  }
- ],
- "metadata": {
-  "kernelspec": {
-   "display_name": "Python 3 (ipykernel)",
-   "language": "python",
-   "name": "python3"
-  },
-  "language_info": {
-   "codemirror_mode": {
-    "name": "ipython",
-    "version": 3
-   },
-   "file_extension": ".py",
-   "mimetype": "text/x-python",
-   "name": "python",
-   "nbconvert_exporter": "python",
-   "pygments_lexer": "ipython3",
-   "version": "3.13.7"
-  }
- },
- "nbformat": 4,
- "nbformat_minor": 5
-}
+# --- Imports
+%pip install --upgrade pip
+%pip install networkx qiskit qiskit-aer qiskit-optimization matplotlib cirq
+import networkx as nx
+import numpy as np
+import itertools
+import matplotlib.pyplot as plt
+
+from qiskit.quantum_info import SparsePauliOp
+from qiskit.circuit.library import QAOAAnsatz
+from qiskit_aer import AerSimulator
+from qiskit import transpile
+from qiskit.visualization import plot_histogram
+
+# --- 1) Build the weighted graph
+G = nx.Graph()
+G.add_edge(0, 1, weight=2)
+G.add_edge(1, 2, weight=500)
+G.add_edge(2, 3, weight=1)
+G.add_edge(3, 0, weight=5)
+G.add_edge(3, 4, weight=10000)
+G.add_edge(4, 1, weight=3)
+# (keep any extra edges commented if you wish)
+
+n = G.number_of_nodes()
+nodes = list(G.nodes)
+
+# --- 2) Build the QAOA cost operator H = sum_ij w_ij * (I - Z_i Z_j)/2
+# Qiskit uses little-endian Pauli strings (qubit 0 is right-most char).
+def zz_op(i, j, n_qubits):
+    s = ['I'] * n_qubits
+    s[n_qubits - 1 - i] = 'Z'
+    s[n_qubits - 1 - j] = 'Z'
+    return SparsePauliOp(''.join(s), [1.0])
+
+I = SparsePauliOp.from_list([('I' * n, 1.0)])
+
+cost_op = None
+const_offset = 0.0
+for u, v, data in G.edges(data=True):
+    w = float(data.get('weight', 1.0))
+    term = (I - zz_op(u, v, n)) * (w * 0.5)
+    cost_op = term if cost_op is None else (cost_op + term)
+    const_offset += 0.0  # offset is embedded via the I term above; kept for clarity
+
+# --- 3) QAOA circuit (you can change reps)
+reps = 2
+ansatz = QAOAAnsatz(cost_operator=cost_op, reps=reps)
+ansatz.measure_all()
+
+# Random parameters for a quick demo (use an optimizer for real runs)
+params = dict(zip(ansatz.parameters,
+                  np.concatenate([
+                      np.random.uniform(0, np.pi, reps),      # betas
+                      np.random.uniform(0, 2*np.pi, reps)     # gammas
+                  ])))
+qc = ansatz.assign_parameters(params)
+
+# --- 4) Simulate
+sim = AerSimulator()
+compiled = transpile(qc, sim)
+result = sim.run(compiled, shots=10_000).result()
+counts = result.get_counts()
+
+print("Weighted Max-Cut measurement counts (top 10):")
+print(dict(sorted(counts.items(), key=lambda x: x[1], reverse=True)[:10]))
+
+# --- 5) Filter trivial all-0 / all-1 bitstrings (optional)
+def is_trivial(bitstr):
+    return bitstr.count('0') in (0, len(bitstr))  # all 1s or all 0s
+filtered_counts = {s: c for s, c in counts.items() if not is_trivial(s)}
+print("\nFiltered non-trivial results (top 10):")
+print(dict(sorted(filtered_counts.items(), key=lambda x: x[1], reverse=True)[:10]))
+
+# --- 6) Classical weighted Max-Cut (brute force for small n)
+def weighted_cut_value(G, subset):
+    """Sum of weights for edges crossing between subset and its complement."""
+    S = set(subset)
+    value = 0.0
+    for u, v, data in G.edges(data=True):
+        if (u in S) ^ (v in S):  # XOR: exactly one in S
+            value += float(data.get('weight', 1.0))
+    return value
+
+def classical_maxcut(G):
+    best_val = -1.0
+    best_part = None
+    V = list(G.nodes)
+    # skip empty and full subsets to avoid trivial partitions
+    for r in range(1, len(V)):
+        for subset in itertools.combinations(V, r):
+            # to avoid double-counting complementary partitions, enforce smallest node in subset
+            if 0 in V and (0 not in subset):  # simple symmetry breaker using node 0
+                continue
+            val = weighted_cut_value(G, subset)
+            if val > best_val:
+                best_val = val
+                best_part = (set(subset), set(V) - set(subset))
+    return best_val, best_part
+
+best_val, best_partition = classical_maxcut(G)
+print(f"\nClassical weighted Max-Cut value: {best_val}")
+print(f"Best partition: {sorted(list(best_partition[0]))} | {sorted(list(best_partition[1]))}")
+
+# --- 7) Plot histogram
+fig = plot_histogram(counts)
+plt.show()
